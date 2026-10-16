@@ -49,6 +49,11 @@ contracts, so their absolute results do not isolate memory ownership alone.
 
 ## External state and history
 
+![Four state-support conditions: RAW, PSR, SSR, and VI.](assets/state_conditions.png)
+
+The diagram contrasts observation-only input, prose and structured reminders,
+and structured reminders with report verification.
+
 | Condition | State support |
 |---|---|
 | RAW | Current observation, without an injected state reminder. |
@@ -58,6 +63,18 @@ contracts, so their absolute results do not isolate memory ownership alone.
 
 Earlier versions of this overview called the verification condition **SRVC**.
 The current study uses **VI**.
+
+### How VI checks a state report
+
+![VI parses the state report and checks the current node and visited set against the environment.](assets/vi_state_matching.png)
+
+The checker compares the reported current node and visited-node set with the
+verified environment record. Visited-node order does not matter for this report
+check; traversal order is evaluated separately. Missing, malformed, or incorrect
+reports trigger a correction on the next turn. A verified report does not by
+itself establish that the chosen action is algorithmically correct.
+
+### Retaining or clearing reminders
 
 Under **retain**, earlier injected reminders remain. Under **clear injection**,
 only older reminder text is removed: earlier observations and visible replies
@@ -109,6 +126,14 @@ Each external-state row pools 3,200 trajectories across models, difficulties,
 and history policies.
 
 ### Initial external-state campaign
+
+![Initial campaign: graph completion, recorded FIFO success, and replayed AQA success for BFS and DFS.](assets/result_task_performance.png)
+
+This figure covers the initial 25,600-trajectory campaign: BFS without a supplied
+queue and DFS with a supplied stack. Columns distinguish visiting all nodes from
+satisfying the recorded FIFO or replayed AQA traversal rules. BFS and DFS panels
+use different vertical scales. The matched follow-up and model-memory results
+are reported separately below.
 
 | Task | Control state | Condition | Graph completion | AQA algorithm-correct completion |
 |---|---|---|---:|---:|
@@ -163,11 +188,27 @@ action coherence, history and feedback use, and visible response quality on
 1–5 scales. Model, condition, history-policy labels, and aggregate outcome
 scores were withheld, though prompt contents revealed some state-support cues.
 
+![Mean judge ratings for state tracking, algorithm/action coherence, history/feedback use, and visible response quality, split by BFS and DFS.](assets/result_judge_dimensions.png)
+
+The heatmaps summarize the primary judge pass on the initial campaign. Each cell
+is a mean rating on a 1–5 scale, not a task-success percentage. The BFS/DFS contrast
+must be read in light of their different supplied control state.
+
 Equal-weight mean ratings were RAW **1.82**, PSR **2.85**, SSR **3.03**, and VI
 **2.59**. These are descriptive ratings, not validated measurements of hidden
 reasoning. All judgments passed schema extraction; seven semantic warning flags
 were inspected. The selected 246 repeat judgments and independent blinded human
 calibration remain incomplete. Behavioral results remain the primary evidence.
+
+## VI protocol diagnostics
+
+![Recorded VI report statuses and trajectories exposed to conflicting temporal values.](assets/result_vi_protocol.png)
+
+The left panel reports state-report outcomes; the right counts trajectories
+with at least one correction about a previous turn alongside different
+current-state values (4,625 of 6,400, or 72.3%). These panels use different units:
+reports versus trajectories. Percentages are rounded. This describes the initial
+VI protocol and does not show that verification itself causes poorer performance.
 
 ## Limitations
 
