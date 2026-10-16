@@ -4,179 +4,211 @@ Sushmita Paul
 
 **Collaborators:** Apurbo Banik Turjo, Dr. Ch. Md. Rakin Haider
 
-Maintained research workspace. Updated September 2026. Work in progress.
+Research progress updated **15 October 2026**. Paper in preparation.
 
-This is a public overview of an ongoing study. Results, exact prompts, traces,
-and implementation details will remain private until they are ready to share.
+This repository presents the study's design and current aggregate results. Raw
+trajectories, full prompts, and run manifests are not included. This overview
+is synchronized with the shared [Task-Tracker study](https://github.com/excellencior/Task-Tracker).
 
-## Abstract
+## Research question
 
-Small language models are useful when compute, cost, or privacy matters. But a
-model that answers one prompt well may still lose track of a task over a long
-interaction. It has to remember earlier steps, update its state as new
-information arrives, and recover when something goes wrong.
+**Can small language models manage their own task memory as observations arrive,
+and when do they need externally maintained state?**
 
-The project asks:
+An agent acting over many turns must incorporate new information without losing
+what it has already learned. We study conversation history, verified external
+state, state-report correction, and model-managed memory using interactive
+breadth-first search (BFS) and depth-first search (DFS) on partially observed
+trees. Each turn reveals only the neighbors of the node reached.
 
-> **How should an interactive system represent and manage state so that a small
-> language model can reason more reliably over many turns?**
+These controlled tasks let us distinguish visiting all nodes from following the
+required traversal order. They are diagnostics, not the full range of agents
+we hope to study.
 
-I study external state support, conversation history, and state verification
-in partially observed tasks. Interactive BFS and DFS give us a controlled way
-to observe these problems. They are test cases, not the wider goal of the
-research.
+![External-state experimental setup.](assets/research_setup.png)
 
-## Why this matters
+## Experimental setup
 
-Many agents work one step at a time. A tool result, user reply, test failure, or
-environment change reveals information needed for the next step. A specialized
-SLM can keep a task-specific registry instead of reconstructing everything from
-a growing conversation. Facts visible to the surrounding system can also be
-checked when needed.
+Completed behavioral experiments contain **57,600 trajectories** across two
+external-state campaigns and two model-managed-memory variants. All use
+Qwen3-1.7B, Qwen3.5-2B, Qwen3.5-4B, and Gemma-4-E4B-IT; normal and hard BFS/DFS
+instances; 200 matched graphs per exact cell; greedy decoding; a 4,096-token
+output cap; a 2,048-token thinking budget; and a 32,768-token context limit.
 
-This idea is relevant to:
+| Campaign | Trajectories | State or memory | History and execution |
+|---|---:|---|---|
+| Initial external state | 25,600 | BFS: current node and visited nodes, no queue. DFS: current node, visited nodes, and stack. RAW, PSR, SSR, VI. | Retain/clear injections; `p1_concise_legacy`; H100 NVL; up to 16 parallel trajectories. |
+| Matched control-state follow-up | 25,600 | BFS queue supplied; DFS stack omitted. Same four conditions. | Same task prompt, graphs, decoding, limits, and scorer; retain/clear injections; H100; 64 parallel trajectories. |
+| Model memory + history | 3,200 | Model-chosen free-schema JSON memory, capped at 1,024 tokens; no verified queue or stack. | Full conversation plus latest memory; `p1_model_memory_injection`; H100; 64 parallel trajectories. |
+| Model memory only | 3,200 | Model-owned JSON store is the only cross-turn memory beyond current observation and feedback. | Earlier conversation omitted; `p1_model_memory_memory_only`; H100; 64 parallel trajectories. |
 
-- tool-using agents that must track calls, results, dependencies, and pending work;
-- troubleshooting systems that keep test results and possible causes;
-- task-oriented assistants that collect information and complete a workflow;
-- software and data agents that track files, tests, transformations, and remaining steps.
+Together, the external-state campaigns cover BFS with and without its queue and
+DFS with and without its stack. The model-managed variants ask whether the model
+can choose what to store and preserve it. They use different prompts and response
+contracts, so their absolute results do not isolate memory ownership alone.
 
-The aim is to locate the actual failure. Did the model misunderstand new
-information, lose the task state, update its plan incorrectly, choose the wrong
-action, or fail to recover after feedback?
+## External state and history
 
-## The interaction problem
-
-![A small language model acts on partial observations while an external system maintains verified state.](assets/research_setup.png)
-
-At each turn, the model receives a local observation and chooses its next
-action. The environment keeps a verified record of the task. We test whether
-that record should be returned to the model and how it should be presented.
-
-This lets us observe failures such as forgetting earlier decisions, confusing
-the current state, repeating work, breaking the required procedure, and failing
-to recover from an error.
-
-## Four forms of state support
-
-![Four state-support conditions: RAW, PSR, SSR, and SRVC.](assets/state_conditions.png)
-
-| Condition | What happens |
+| Condition | State support |
 |---|---|
-| **RAW** | The model receives only the current observation. |
-| **PSR: Prose State Reminder** | Verified state is restated in plain language. |
-| **SSR: Structured State Reminder** | The same state is provided in a tagged block. |
-| **SRVC: State Report Verification and Correction** | The model reports its state estimate. The system checks it and gives targeted feedback when needed. |
+| RAW | Current observation, without an injected state reminder. |
+| PSR: Prose State Reminder | Verified state restated in ordinary language. |
+| SSR: Structured State Reminder | The same task-specific facts in a tagged block. |
+| VI: Verifiable Injection | SSR plus a required state report, checked against the environment; missing, malformed, or incorrect reports receive feedback on the next turn. |
 
-These conditions help us ask whether external state helps, whether its format
-matters, and whether explicit state reports support verification and recovery.
+Earlier versions of this overview called the verification condition **SRVC**.
+The current study uses **VI**.
 
-## How SRVC works
+Under **retain**, earlier injected reminders remain. Under **clear injection**,
+only older reminder text is removed: earlier observations and visible replies
+remain, and the current reminder is always present. This differs from the
+model-memory-only variant, which omits earlier conversation history.
 
-![SRVC parses a model state report, compares it with verified state, and issues a targeted correction after a failed check.](assets/srvc_state_matching.png)
+![Retaining or clearing older injected reminders.](assets/history_policies.png)
 
-Under SRVC, the model reports its current node and visited nodes. The system
-compares that report with the verified environment state. A report can be:
+## Model-managed memory
 
-- **missing:** the state block is absent;
-- **malformed:** a required field cannot be read;
-- **incorrect:** the reported state does not match;
-- **verified:** the reported state matches.
+The model decides what information to keep in a JSON store and updates that
+store as it acts. We compare access to this store alongside conversation history
+with access to the store without that history. This tests more than recall:
+the model must select useful information, update it correctly, and use it to
+choose an action.
 
-If the check fails, the next turn includes a focused correction. This lets us
-study both the original state error and what happens after feedback.
-
-## Why conversation history matters
-
-![Comparison of retaining and clearing historical state injections while preserving the conversation.](assets/history_policies.png)
-
-A reminder may help now but become stale later. We compare two policies:
-
-- **retain injections:** old state reminders stay in the conversation;
-- **clear historical injections:** each reminder is removed after its turn.
-
-Earlier observations and visible model replies remain in both cases. Only the
-injected reminder is cleared.
-
-## Research questions
-
-1. How does external state support affect long-horizon behavior in small language models?
-2. Does structured state work differently from the same information in prose?
-3. What changes when old state injections are retained or cleared?
-4. What state-report errors occur, and when does correction help?
-
-## Observations so far
-
-These are early observations from the experiments and reasoning traces. They
-will be tested more carefully in the final analysis.
-
-1. **Smaller models often get stuck in verification loops.** An SLM may reach
-   the correct result and still continue checking the same reasoning instead
-   of committing to an answer. This appears more often in the smaller models.
-   Limited model capacity and a narrower range of learned reasoning patterns
-   are possible explanations, but the trace analysis is still in progress.
-2. **A clear system prompt matters.** The prompt needs to describe the
-   specialized task and the current interaction precisely. In one early setup,
-   models did not understand that the solution should unfold across multiple
-   turns. They tried to simulate the whole interaction inside every response.
-   A concise and clearer system prompt reduced this behavior.
-3. **Verbosity is difficult to control, but it can sometimes help.** Models do
-   not always follow the requested response format and may produce much more
-   reasoning than needed. At the same time, those visible explanations remain
-   in later context and can support subsequent reasoning through in-context
-   self-conditioning. Verbosity can therefore be either useful or harmful,
-   depending on what the model preserves.
-4. **SLMs struggle to maintain algorithmic working state internally.** This is
-   especially visible in BFS, where we intentionally did not provide the
-   ordered queue and required the model to maintain it. Performance remained poor.
-   DFS improved noticeably when the current stack was supplied. This is not a
-   direct comparison of BFS and DFS difficulty because the two tasks received
-   different levels of algorithmic state support. Instead, it suggests that
-   externalizing task-relevant working state can substantially change SLM
-   behavior.
-
-## Working plan
-
-### Done
-
-- [x] Define the study.
-- [x] Build the four state conditions.
-- [x] Add the two history policies.
-- [x] Set the evaluation measures.
-
-### In progress
-
-- [x] Finish the matched runs.
-- [ ] Check runs and provenance.
-- [ ] Summarize the results.
-
-### Next
-
-- [ ] Apply an LLM judge to extract general metrics from results and reasoning traces.
-- [ ] Study SRVC errors and recovery.
-- [ ] Write the results and limitations.
-- [ ] Prepare the public artifacts.
+The initial pilot also tested compliance with an outer JSON response format.
+Format failures therefore confound conclusions about memory quality. An ongoing
+**25,600-trajectory memory-responsibility study** compares RAW, oracle state,
+free-form model memory, and fixed-schema model memory, each with and without
+conversation history. Its outer JSON response is constrained to reduce this
+formatting confound.
 
 ## Evaluation
 
-The main measures come from the environment, including completion, traversal
-correctness, valid actions, and recovery. Trace analysis will help explain how
-the model reached those outcomes. Any model-based judgment will be checked
-against human-reviewed examples before it is treated as evidence.
+- **Graph completion:** whether every node was visited, regardless of order.
+- **Correct traversal prefix:** the uninterrupted initial sequence of
+  algorithm-correct accepted moves divided by recorded node-history length.
+  Later recovery does not restore the prefix.
+- **Algorithm-correct completion:** completion with a perfect traversal prefix.
+- **Zero-error FIFO success:** strict FIFO traversal success without invalid
+  attempts or format failures.
+- **Valid-move rate:** admissible attempts divided by all recorded attempts.
+  A legal move can still violate traversal order.
+- **Final decoverage:** the fraction of graph nodes left unvisited.
 
-## What is not public yet
+Accumulated decoverage is interpreted alongside completion and episode length:
+a short failed episode can have a misleadingly small accumulated value.
 
-The study is still in progress, so this repository does not currently include:
+The initial BFS runs used a strict FIFO-head checker. Recorded actions were
+also replayed under the historical AQA-Bench BFS frontier checker. The first
+table below reports replayed AQA success; the follow-up and memory tables report
+strict recorded traversal success. These success columns are not interchangeable.
+DFS scores coincide under the two rules.
 
-- quantitative results or model rankings;
-- exact prompts or decoding settings;
-- unreleased traces or run manifests;
-- implementation details still being checked.
+## Current behavioral results
 
-Validated results, statistical comparisons, and reproducible artifacts will be
-added when they are ready.
+Each external-state row pools 3,200 trajectories across models, difficulties,
+and history policies.
+
+### Initial external-state campaign
+
+| Task | Control state | Condition | Graph completion | AQA algorithm-correct completion |
+|---|---|---|---:|---:|
+| BFS | Queue not supplied | RAW | 10.94% | 0.44% |
+| BFS | Queue not supplied | PSR | 24.50% | 1.63% |
+| BFS | Queue not supplied | SSR | 24.53% | 2.56% |
+| BFS | Queue not supplied | VI | 16.41% | 3.03% |
+| DFS | Stack supplied | RAW | 22.69% | 14.88% |
+| DFS | Stack supplied | PSR | 72.84% | 58.13% |
+| DFS | Stack supplied | SSR | 79.19% | 70.00% |
+| DFS | Stack supplied | VI | 74.59% | 62.81% |
+
+### Matched control-state follow-up
+
+| Task | Control state | Condition | Graph completion | Strict success |
+|---|---|---|---:|---:|
+| BFS | Queue supplied | RAW | 10.00% | 0.28% |
+| BFS | Queue supplied | PSR | 82.09% | 33.19% |
+| BFS | Queue supplied | SSR | 87.75% | 45.91% |
+| BFS | Queue supplied | VI | 80.25% | 35.31% |
+| DFS | Stack omitted | RAW | 25.41% | 16.38% |
+| DFS | Stack omitted | PSR | 51.16% | 40.53% |
+| DFS | Stack omitted | SSR | 46.88% | 38.38% |
+| DFS | Stack omitted | VI | 41.75% | 32.72% |
+
+Supplying the BFS queue raises externally assisted BFS performance, while
+removing the DFS stack reduces corresponding DFS performance. RAW changes
+little. The original task gap therefore partly reflected supplied control
+state; this does not establish that BFS and DFS are intrinsically identical.
+
+### Model-managed-memory pilot
+
+Each row pools 1,600 trajectories across four models and two difficulties.
+
+| Task | Memory variant | Graph completion | Strict success |
+|---|---|---:|---:|
+| BFS | Memory with full history | 1.38% | 0.12% |
+| BFS | Memory as the only cross-turn store | 3.25% | 0.19% |
+| DFS | Memory with full history | 22.69% | 12.69% |
+| DFS | Memory as the only cross-turn store | 2.69% | 1.00% |
+
+Allowing a model to create a store does not ensure it preserves sufficient task
+state when history is removed. BFS remains weak in both variants. These runs
+jointly test memory design, retention, action selection, and format compliance;
+they are not an isolated causal comparison with externally verified state.
+
+## Reasoning-trace analysis
+
+A separate primary LLM-judge pass evaluated 2,560 paired trajectories using
+`claude-opus-4-6-thinking`. It rated state tracking, algorithmic reasoning and
+action coherence, history and feedback use, and visible response quality on
+1–5 scales. Model, condition, history-policy labels, and aggregate outcome
+scores were withheld, though prompt contents revealed some state-support cues.
+
+Equal-weight mean ratings were RAW **1.82**, PSR **2.85**, SSR **3.03**, and VI
+**2.59**. These are descriptive ratings, not validated measurements of hidden
+reasoning. All judgments passed schema extraction; seven semantic warning flags
+were inspected. The selected 246 repeat judgments and independent blinded human
+calibration remain incomplete. Behavioral results remain the primary evidence.
+
+## Limitations
+
+- Four checkpoints, selected trees, finite token limits, and one execution per
+  exact cell limit generalization.
+- The initial external-state campaign was asymmetric. The follow-up covers the
+  complementary queue/stack settings; matched analysis is ongoing.
+- Model-managed variants differ in prompts and JSON contracts. The new study
+  aims to separate memory behavior from response-format compliance.
+- VI combines reporting, delayed feedback, and prompt-format tension. In 4,625
+  of 6,400 VI trajectories, at least one correction about a previous turn appears
+  alongside different current-state values. This does not identify the causal
+  effect of verification alone.
+- Selected traces illustrate failures but do not establish their prevalence.
+- Transfer beyond graph traversal has not yet been established.
+
+## Research progress
+
+### Completed
+
+- [x] Build and validate the BFS/DFS evaluation pipeline.
+- [x] Run the initial 25,600-trajectory external-state campaign.
+- [x] Audit behavioral metrics and complete the 2,560-trajectory primary judge pass.
+- [x] Run the matched 25,600-trajectory queue/stack follow-up.
+- [x] Run the 6,400-trajectory model-managed-memory pilot.
+- [x] Back up follow-up trajectories and preserve run manifests.
+
+### In progress
+
+- [ ] Complete the 25,600-trajectory memory-responsibility study.
+- [ ] Complete matched analysis, including model- and difficulty-level effects.
+- [ ] Trace the first memory inconsistency and distinguish memory-selection,
+  memory-update, and action-selection failures.
+
+### Next
+
+- [ ] Complete judge repeatability and independent human calibration.
+- [ ] Evaluate a time-aligned VI protocol.
+- [ ] Test transfer beyond graph traversal.
 
 ---
 
 **Sushmita Paul** · Dhaka, Bangladesh  
-[GitHub](https://github.com/mitu247) · [Portfolio](https://sushmitapaul.onrender.com) · [LinkedIn](https://www.linkedin.com/in/sushmita-paul-3b19741a4/) · [Email](mailto:sushmitap247@gmail.com)
+[GitHub](https://github.com/mitu247) · [Portfolio](https://sushmitapaul.onrender.com) · [Email](mailto:sushmitap247@gmail.com)
